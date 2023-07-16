@@ -16,28 +16,27 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/jinzhu/gorm"
 	_ "github.com/jinzhu/gorm/dialects/mysql"
 )
 
 func main() {
 	nclient := etherclient.ConnEth()
 	dba := db.Buildconnect()
+	dba.AutoMigrate(&table.Transfer{})
 
 	logs := historyLogs(nclient, config.Historyfileter)
 	parseLogs(logs)
 
-	dba.AutoMigrate(&table.Transfer{})
-	db.Insert(dba, logs)
+	for _, log := range *logs {
+		db.Insert(dba, log)
+	}
 
-	// var pendingfileter Filter = Filter{
-	// 	address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
-	// 	topic:   "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
-	// }
-	// subscribeLogs(nclient, pendingfileter)
+	//subscribeLogs(dba, nclient, config.Pendingfileter)
 
 }
 
-func subscribeLogs(eclient *ethclient.Client, filter config.Filter) {
+func subscribeLogs(dba *gorm.DB, eclient *ethclient.Client, filter config.Filter) *[]types.Log {
 	contractAddress := []common.Address{
 		common.HexToAddress(filter.Address),
 	}
@@ -56,7 +55,8 @@ func subscribeLogs(eclient *ethclient.Client, filter config.Filter) {
 		case err := <-cominglogs.Err():
 			log.Fatal(err)
 		case vLog := <-logs:
-			outputLog(vLog)
+			//outputLog(vLog)
+			db.Insert(dba, vLog)
 		}
 	}
 }

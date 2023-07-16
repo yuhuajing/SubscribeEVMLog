@@ -11,17 +11,17 @@ import (
 )
 
 // Insertion
-func Insert(dba *gorm.DB, logs *[]types.Log) {
+func Insert(dba *gorm.DB, txdata types.Log) {
 	//res := dba.Model(&table.TxResult{}).Where("hash = ?", tx.Hash).First(&table.TxResult{})
 	//res := dba.Table("tx_results").Where("hash = ?", tx.Hash).First(&table.TxResult{})
 	//if res.RowsAffected == 0 {
-	for _, txdata := range *logs {
-		dba.Create(&table.Transfer{
-			From:  "0x" + txdata.Topics[1].Hex()[26:],
-			To:    "0x" + txdata.Topics[2].Hex()[26:],
-			Value: ParseByteToUint(txdata.Data),
-		})
-	}
+
+	dba.Create(&table.Transfer{
+		From:  "0x" + txdata.Topics[1].Hex()[26:],
+		To:    "0x" + txdata.Topics[2].Hex()[26:],
+		Value: ParseByteToUint(txdata.Data),
+	})
+
 	//}
 }
 
