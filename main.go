@@ -25,14 +25,14 @@ func main() {
 	dba := db.Buildconnect()
 	dba.AutoMigrate(&table.Transfer{})
 
-	logs := historyLogs(nclient, config.Historyfileter)
-	parseLogs(logs)
+	// logs := historyLogs(nclient, config.Historyfileter)
+	// parseLogs(logs)
 
-	for _, log := range *logs {
-		db.Insert(dba, log)
-	}
+	// for _, log := range *logs {
+	// 	db.Insert(dba, log)
+	// }
 
-	//subscribeLogs(dba, nclient, config.Pendingfileter)
+	subscribeLogs(dba, nclient, config.Pendingfileter)
 
 }
 
@@ -55,7 +55,7 @@ func subscribeLogs(dba *gorm.DB, eclient *ethclient.Client, filter config.Filter
 		case err := <-cominglogs.Err():
 			log.Fatal(err)
 		case vLog := <-logs:
-			//outputLog(vLog)
+			outputLog(vLog)
 			db.Insert(dba, vLog)
 		}
 	}
