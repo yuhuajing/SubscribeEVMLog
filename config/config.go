@@ -36,7 +36,7 @@ type MysqlConFig struct {
 var MysqlCon = MysqlConFig{
 	"127.0.0.1",
 	3306,
-	"testUser",
+	"eventLog",
 	"root",
 	"123456",
 	10,
