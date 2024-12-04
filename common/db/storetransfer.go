@@ -1,39 +1,21 @@
 package db
 
 import (
-	"fmt"
-	"main/common/table"
-	"math/big"
-	"strconv"
-
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/jinzhu/gorm"
+	"main/common/table"
+	"strings"
 )
 
 // Insertion
-func Insert(dba *gorm.DB, txdata types.Log) {
-	//res := dba.Model(&table.TxResult{}).Where("hash = ?", tx.Hash).First(&table.TxResult{})
-	//res := dba.Table("tx_results").Where("hash = ?", tx.Hash).First(&table.TxResult{})
-	//if res.RowsAffected == 0 {
-
-	dba.Create(&table.Transfer{
-		From:  "0x" + txdata.Topics[1].Hex()[26:],
-		To:    "0x" + txdata.Topics[2].Hex()[26:],
-		Value: ParseByteToUint(txdata.Data),
-	})
-
-	//}
-}
-
-func ParseByteToUint(b []byte) uint64 {
-	str := ""
-	for i := 0; i < len(b)/32; i++ {
-		num := big.NewInt(0)
-		num.SetBytes(b[i*32 : i*32+32])
-		resInt := fmt.Sprintf("%d", num)
-		str += resInt + ""
+func Insert(dba *gorm.DB, data types.Log) {
+	res := dba.Model(&table.Transfer{}).Where("block_hash = ? AND block_index = ?", strings.ToLower(data.BlockHash.Hex()), data.Index).Find(&table.Transfer{})
+	if res.RowsAffected == 0 {
+		dba.Create(&table.Transfer{
+			From:       data.Topics[1].Hex(),
+			To:         data.Topics[2].Hex(),
+			BlockHash:  strings.ToLower(data.BlockHash.Hex()),
+			BlockIndex: data.Index,
+		})
 	}
-	uint64Value, _ := strconv.ParseUint(str, 10, 64)
-
-	return uint64Value
 }

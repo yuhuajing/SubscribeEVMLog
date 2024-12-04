@@ -3,117 +3,125 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
+	"main/common/table"
+	"sync"
 
 	"main/common/db"
 	"main/common/etherclient"
-	"main/common/table"
-	"main/config"
 	"math/big"
 
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethclient"
-	"github.com/jinzhu/gorm"
 	_ "github.com/jinzhu/gorm/dialects/mysql"
 )
 
+var (
+	wg       sync.WaitGroup
+	logsChan = make(chan types.Log, 0)
+	client   *ethclient.Client
+)
+
+func checkError(err error) {
+	if err != nil {
+		log.Fatalf("Error = %v", err)
+	}
+}
+
 func main() {
-	nclient := etherclient.ConnEth()
-	dba := db.Buildconnect()
-	dba.AutoMigrate(&table.Transfer{})
+	client = etherclient.ConnEth()
 
-	// logs := historyLogs(nclient, config.Historyfileter)
-	// parseLogs(logs)
-
-	// for _, log := range *logs {
-	// 	db.Insert(dba, log)
-	// }
-
-	subscribeLogs(dba, nclient, config.Pendingfileter)
+	contracts := []string{"0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48"}
+	topics := []string{"0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"}
+	wg.Add(2)
+	go FilterLogs(17704346, 17704349, contracts, topics)
+	go subscribeLogs(contracts, topics)
+	wg.Wait()
 
 }
 
-func subscribeLogs(dba *gorm.DB, eclient *ethclient.Client, filter config.Filter) *[]types.Log {
-	contractAddress := []common.Address{
-		common.HexToAddress(filter.Address),
-	}
-	query := ethereum.FilterQuery{
-		Addresses: contractAddress,
-		Topics:    [][]common.Hash{{common.HexToHash(filter.Topic)}},
-	}
-	logs := make(chan types.Log)
+func subscribeLogs(addresses, topics []string) *[]types.Log {
+	defer wg.Done()
+	query := ethereum.FilterQuery{}
 
-	cominglogs, err := eclient.SubscribeFilterLogs(context.Background(), query, logs)
-	if err != nil {
-		log.Fatal(err)
+	for _, address := range addresses {
+		query.Addresses = append(query.Addresses, common.HexToAddress(address))
 	}
+	top := make([]common.Hash, 0)
+	for _, topic := range topics {
+		top = append(top, common.HexToHash(topic))
+	}
+	query.Topics = append(query.Topics, top)
+	events, err := client.SubscribeFilterLogs(context.Background(), query, logsChan)
+	if err != nil {
+		log.Fatalf("Subscribe Event error: %v", err)
+	}
+
+	dba := db.BuildConnect()
+	dba.AutoMigrate(&table.Transfer{})
 	for {
 		select {
-		case err := <-cominglogs.Err():
-			log.Fatal(err)
-		case vLog := <-logs:
-			outputLog(vLog)
+		case err := <-events.Err():
+			fmt.Println(fmt.Errorf("parse Event error: %v", err))
+			subscribeLogs(addresses, topics)
+		case vLog := <-logsChan:
+			//outputLog(vLog)
 			db.Insert(dba, vLog)
 		}
 	}
 }
 
-func historyLogs(eclient *ethclient.Client, filter config.Filter) *[]types.Log {
-	contractAddress := []common.Address{
-		common.HexToAddress(filter.Address),
-	}
-	query := ethereum.FilterQuery{
-		FromBlock: big.NewInt(filter.From),
-		ToBlock:   big.NewInt(filter.To),
-		Addresses: contractAddress,
-		Topics:    [][]common.Hash{{common.HexToHash(filter.Topic)}},
-	}
+func FilterLogs(startBlockHeight, latestBlockNum int64, addresses, topics []string) {
+	defer wg.Done()
+	i := startBlockHeight
+	for i <= latestBlockNum {
+		from := &big.Int{}
+		from = from.SetInt64(startBlockHeight)
+		i += 5000
+		to := &big.Int{}
+		if i > latestBlockNum {
+			to = to.SetInt64(latestBlockNum)
+		} else {
+			to = to.SetInt64(i)
+		}
+		query := ethereum.FilterQuery{
+			FromBlock: from,
+			ToBlock:   to,
+		}
+		for _, address := range addresses {
+			query.Addresses = append(query.Addresses, common.HexToAddress(address))
+		}
+		top := make([]common.Hash, 0)
+		for _, topic := range topics {
+			top = append(top, common.HexToHash(topic))
+		}
+		query.Topics = append(query.Topics, top)
 
-	logs, err := eclient.FilterLogs(context.Background(), query)
-	if err != nil {
-		log.Fatal(err)
-	}
+		logs, err := client.FilterLogs(context.Background(), query)
+		if err != nil {
+			checkError(errors.New(fmt.Sprintf("Error in filter logs :%v", err)))
+		}
 
-	return &logs
-
-}
-func parseLogs(logs *[]types.Log) {
-	for _, vLog := range *logs {
-		outputLog(vLog)
-	}
-}
-
-func outputLog(vLog types.Log) {
-	byteLog, _ := MarshalJSON(vLog)
-	fmt.Println(string(byteLog))
-}
-
-func MarshalJSON(l types.Log) ([]byte, error) {
-	type Log struct {
-		From  string `json:"from" gencodec:"required"`
-		To    string `json:"to" gencodec:"required"`
-		Value uint64 `json:"value" gencodec:"required"`
-	}
-	var enc Log
-
-	enc.From = "0x" + l.Topics[1].Hex()[26:]
-	enc.To = "0x" + l.Topics[2].Hex()[26:]
-	enc.Value = db.ParseByteToUint(l.Data)
-
-	return json.Marshal(&enc)
-}
-
-func StartsWith(s, prefix string) bool {
-	if len(s) < len(prefix) {
-		return false
-	}
-	for i := 0; i < len(prefix); i++ {
-		if s[i] != prefix[i] {
-			return false
+		for _, OpLog := range logs {
+			logsChan <- OpLog
 		}
 	}
-	return true
+}
+
+func MarshalJSON(l types.Log) (string, error) {
+	var enc table.Transfer
+	enc.From = "0x" + l.Topics[1].Hex()[26:]
+	enc.To = "0x" + l.Topics[2].Hex()[26:]
+	enc.BlockHash = l.BlockHash.Hex()
+	enc.BlockIndex = l.Index
+
+	byteLog, err := json.Marshal(&enc)
+	if err != nil {
+		return string(byteLog), err
+	}
+	return string(byteLog), nil
 }
